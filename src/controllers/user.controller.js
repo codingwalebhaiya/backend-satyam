@@ -4,7 +4,9 @@ import { User } from "../models/user.models.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
-import mangoose from "mongoose";
+import mongoose from "mongoose";
+
+// this method(generateAccessAndRefreshTokens) creates for new accessToken & refreshToken.
 
 const generateAccessAndRefreshTokens = async (userId) => {
   try {
@@ -186,11 +188,17 @@ const loginUser = asyncHandler(async (req, res) => {
 // how to user - logout
 
 const logoutUser = asyncHandler(async (req, res) => {
-  User.findByIdAndUpdate(req.user._id, {
-    $set: {
-      refreshToken: undefined,
+  await User.findByIdAndUpdate(
+    req.user._id,
+    {
+      $set: {
+        refreshToken: undefined,
+      },
     },
-  });
+    {
+      new: true,
+    }
+  );
   const options = {
     httpOnly: true,
     secure: true,
@@ -199,48 +207,95 @@ const logoutUser = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .clearCookie("accessToken", options)
-    .json(new ApiResponse(200, {}, "User logged Out"));
+    .clearCookie("refreshToken", options)
+    .json(new ApiResponse(200, {}, "User logged Out successfully"));
 });
 
+//  create end points of refreshAccessToken
+
 const refreshAccessToken = asyncHandler(async (req, res) => {
-  const incomingRefreshToken = req.cookie.refreshToken || req.body.refreshToken;
+  const incomingRefreshToken =
+    req.cookies.refreshToken || req.body.refreshToken;
+  // why i set name incomingRefreshToken because already present refreshToken in database(mongoDB - mongoose)
+  // req.body.refreshToken define the mobile user refresh token
+  //req.body.refreshToken define the desktop user refresh token
+
+  // if incomingRefreshToken does not exist then
 
   if (!incomingRefreshToken) {
-    throw new ApiError(401, "unauthorized request");
+    throw new ApiError(401, "Unauthorized request");
   }
 
+  // verify the incomingRefreshToken by jwt
+  // i want to raw token which is save in database(mongoDB-mongoose)
+  //Asynchronously verify given token using a secret or a public key
+  //to get a decoded token token - JWT string to verify secretOrPublicKey - A string or buffer containing either
+  // the secret for HMAC algorithms, or the PEM encoded public key for RSA and ECDSA. If jwt.verify is called asynchronous
+
+  // incomingRefreshToken changed in decoded token by jwt
   try {
     const decodedToken = jwt.verify(
       incomingRefreshToken,
       process.env.REFRESH_TOKEN_SECRET
     );
   
+    // send a Query to mongoDB for finding a user by userId
+  
     const user = await User.findById(decodedToken?._id);
+    // always remember - i am using await because database are present other quantinent so await using for waiting.
+    // i send Query in database(mongoDB-mongoose)
+  
+    // if user does not come because anyone give a fictisius token then first send error
   
     if (!user) {
       throw new ApiError(401, "Invalid refresh token");
     }
   
+    // match the  1-incomingRefreshToken & 2-incomingRefreshToken after decoded token
+    // incomingRefreshToken - this token is send by user
+    // and other token is incomingRefreshToken after decoded
+    // if both 1 & 2 toke are same to same then
+    // so give the access to user because that person is same .
+    // incomingRefreshToken ko decode karke jo hamne jo user find kiya h uske pass bhi ek token hoga
+    // ab token same honge to matlab mamla theek h abhi
+  
+    // match the both token
+  
+    // if both do not same token
     if (incomingRefreshToken !== user?.refreshToken) {
-      throw new ApiError(401, "Refresh token is expired or used");
+      throw new ApiError(402, "refresh token is expired or used");
     }
   
+    // if both tokens same then create new refreshToken by generateAccessAndRefreshTokens method
+  
+    // first of all send in cookies then put options
+    // these options can create globally but that is right no problem
+    // options are created
     const options = {
       httpOnly: true,
       secure: true,
     };
-    const { accessToken, newrefreshToken } = await generateAccessAndRefreshTokens(
+    // you can do generate token before options creation or after options creation - no problem
+    // generate token by generateAccessAndRefreshTokens method
+    // using await for waiting because database me save hone me kuchh time bhi lagega
+    const { accessToken, newRefreshToken } = await generateAccessAndRefreshTokens(
       user._id
     );
+  
+    // options will create then send response
+  
     return res
       .status(200)
       .cookie("accessToken", accessToken, options)
-      .cookie("refreshToken", newrefreshToken, options)
+      .cookie("refreshToken", newRefreshToken, options)
       .json(
         new ApiResponse(
           200,
-          { accessToken, refreshToken: newrefreshToken },
-          "Access token refreshed"
+          {
+            accessToken,
+            refreshToken: newRefreshToken,
+          },
+          "Access token refreshed successfully"
         )
       );
   } catch (error) {
@@ -248,4 +303,6 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
   }
 });
 
-export { registerUser, loginUser, logoutUser, refreshAccessToken };
+// finally end point come  so go to user.route.js and create refresh token. 
+
+export { registerUser, loginUser, logoutUser, refreshAccessToken};

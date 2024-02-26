@@ -21,12 +21,12 @@ router.route("/register").post(
 
 router.route("/login").post(loginUser)
 
-// secured routes 
+// secured routes - because user should be logged in . 
 router.route("/logout").post(verifyJWT, logoutUser)
+//create a end point of refresh token 
 router.route("/refresh-token").post(refreshAccessToken)
 
-
-
+// in refresh-token- no  need verifyJWT because already refresh token verify in controller.js file 
 
 
 export default router;
