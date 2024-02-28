@@ -613,44 +613,126 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
 
         isSubscribed: {
           $cond: {
-            if: {$in: [req.user?._id, "$subscribers.subscriber"]},
+            if: { $in: [req.user?._id, "$subscribers.subscriber"] },
             then: true,
-            else: false
-          }
-        }
+            else: false,
+          },
+        },
       },
     },
 
-    // fourth pipeline - is pipeline k through project use krna hai 
-    // project q use krna hai? - project projection deta hai ki mai sari value ko eakdam waha par project nahi karunga jobhi vo demand kr rha hai 
-    //  mai use selected value dunga 
+    // fourth pipeline - is pipeline k through project use krna hai
+    // project q use krna hai? - project projection deta hai ki mai sari value ko eakdam waha par project nahi karunga jobhi vo demand kr rha hai
+    //  mai use selected value dunga
     // selected value jaise -  fullName, mere hane ka matlab hai jis jis value ko pass krna hai
-    // but sari value na dijiye kuki network traffic badega aur data ka size badega 
+    // but sari value na dijiye kuki network traffic badega aur data ka size badega
 
     {
       $project: {
         fullName: 1,
         username: 1,
-        subscribersCount:1,
-        channelsSubscribedToCount:1,
-        isSubscribed:1,
-        avatar:1,
-        coverImage:1,
-        email:1,
+        subscribersCount: 1,
+        channelsSubscribedToCount: 1,
+        isSubscribed: 1,
+        avatar: 1,
+        coverImage: 1,
+        email: 1,
         // createdAt:1  // ye batega ki aaplka channel kab create hua hai
-
-      }
-    }
-
+      },
+    },
   ]); // aggregate ek mathod hai jo array leta hai aur array ke pipeline {} likhi jati hai
 
   if (!channel?.length) {
-    throw new ApiError(400, "channel does not exists")
+    throw new ApiError(400, "channel does not exists");
   }
-  
-  // return response in Array form 
-  return res.status(200).json(new ApiResponse(200, channel[0], "User channel fetched successfully"))
 
+  // return response in Array form
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, channel[0], "User channel fetched successfully")
+    );
+});
+
+// getWatchHistory ke liye sub pipelines
+// users ki hamari WatchHistory get kaise hogi
+
+// watchHistory ke video se connect hone k liye aapko multiple document milenge
+// but in sabhi document ke under (owner) nhi hoga
+// isliye jaise hi ek document (video)  se join huye vaise hi turant ek aur document(owner) se join hona padega
+// jisse ki hame ke perfect document mile nahi to half documet milega
+// kahne ka mera matalb hai - hame nexted $lookup krna hoga
+// (owner) se (video) & (video) ke under se jakar (users) se le lenge - this process is nexted lookup.
+
+const getWatchHistory = asyncHandler(async (req, res) => {
+  const user = await User.aggregate([
+    {
+      $match: {
+        _id: new mongoose.Types.ObjectId(req.user._id), // yaha par hame mongoDB ki id ka string only milta hai aur hame puri id chahiye
+        // kuki yaha par mongoose kaam nhi krta hai aggregate pipeline ka jitna code hai vo directly hi jata hai
+      }, // yaha par hame mongoose ki objectId banani padegi
+    },
+    // first aggregate pipeline (match) se hame users mil gya hai
+    // ab second aggregate pipeline se hame watchHistory ke under jan apadega i mean $lookup krna pdega
+
+    {
+      $lookup: {
+        from: "videos",
+        localField: "watchHistory",
+        foreignField: "_id",
+        as: "watchHistory",
+
+        // sub pipeline for owner to users access
+        // ab sub pipeline lagana hai nhi to owner ki koi information nhi milegi
+        pipeline: [
+          {
+            $lookup: {
+              from: "users",
+              localField: "owner",
+              foreignField: "_id",
+              as: "owner",
+
+              // abhi array ke under multiple value aayi hai , i mean pora ka pora user aa gya h
+              // users ka username, email , fullName, avatar ..... aa gya h
+              // but ye sabhi ko owner ke under nhi dena hai
+              // kucch value dena hai - uske liye phir se ek aggregate pipeline lagani hogi
+              // another sub pipeline -
+              pipeline: [
+                {
+                  $project: {
+                    fullName: 1,
+                    username: 1,
+                    avatar: 1,
+                  },
+                },
+              ],
+            },
+          },
+
+          // data jo ki array ke form me frontend engineer ko milta
+          // array data ko sudharane k liye ek aur aggregate pipeline aur lagana hoga
+
+          {
+            $addFields: {
+              owner: {
+                $first: "$owner", // fields me se owner ko nikalna hai isliye owner k sath dollar sign lagega
+              }, // ab frontend engineer ko sidhe owner object mil jayega jisko frontend engineer owner.  krke value nikal lega
+            },
+          },
+        ],
+      },
+    },
+  ]);
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        user[0].watchHistory,
+        " Watch history fetched successfully"
+      )
+    );
 });
 
 export {
@@ -663,4 +745,6 @@ export {
   updateAccountDetails,
   updateUserAvatar,
   updateUserCoverImage,
+  getUserChannelProfile,
+  getWatchHistory
 };
