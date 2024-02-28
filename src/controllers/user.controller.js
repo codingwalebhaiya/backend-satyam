@@ -392,7 +392,7 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
 const getCurrentUser = asyncHandler(async (req, res) => {
   return res
     .status(200)
-    .json(200, req.user, "Current user fetched successfully");
+    .json(new ApiResponse(200, req.user, "Current user fetched successfully"));
 
   // kuki aapki request par middleware run ho chuka hai. ab us object me  user inject ho chuka hai
   // ab use return kr do
@@ -466,6 +466,8 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Avatar file is missing");
   }
 
+  // TODO: delete old image - your assignment
+
   // Avatar file upload on cloudinary
 
   const avatar = await uploadOnCloudinary(avatarLocalPath);
@@ -492,9 +494,6 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, user, "Avatar image uploaded successfully"));
 });
-
-
-
 
 // update user cover image
 
@@ -532,6 +531,128 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, user, "Cover image uploaded successfully"));
 });
 
+// mongoDB aggriation pipeline
+
+const getUserChannelProfile = asyncHandler(async (req, res) => {
+  // jab kisi channel ki profile chaihye to usually aap us channel ke url par jate ho
+  // jaise /chaiaurcode or /programmingwithsatyamp or /dollarpedia  or /mathswithsatyampandey
+  // usi tarike se ham bhi channel profile ka url chahiye
+  // url lena hai to req.params ke madhyam se le skte hai
+  // url se username lena hai
+
+  const { username } = req.params;
+
+  // aapne try kiya ki params se username ka url nikal le but
+  // ho skta hai params empty ho
+  // mere kahne ka matlab hai ki kucch hona chahiye tabhi to Query karunga nhi to kha hi Query karunga
+
+  // username check kr lete h
+
+  if (!username?.trim) {
+    // trim- aur agar username hai to use trim bhi kar lo
+    //  ? marks-  difine krta hai option chaining ko
+    // !username?.trim - is code ka matlab h ki agar username hai to trim karo
+    throw new ApiError(400, " username is missing");
+  }
+
+  // ab mai accept krta hu ki ab username hoga
+  // sabse phle username se apna document find kar lete hai
+  // ek Query chalate hai - user.findById se
+  // usme username dete hai waha wareclouse apne aap lag jayega kucch is tarah se
+
+  // username hamare database me bhi hai aur yha par bhi hai to yha username naam de dete h
+  // User.find({username})  - aese bhi aap kar skte hai
+  // but is code ye problem  hai ki database se user logo pura phir uski id ke base par aggriation lagao ge
+  // itna sab kucch krne ki jarurat hai nahi
+  // aap direct hi aggriation pipeline laga skte hai
+  // quki database me ek match field hota hai to automatically sare document me se sirf  ek document find kr lega aur wahi field ka kaam hai
+
+  const channel = await User.aggregate([
+    {
+      $match: {
+        username: username?.toLowerCase(),
+      }, // to $match field se 1 document (example -programmingwithsatyamp ) filter kr liya
+      // ab is document (programmingwithsatyamp) ke base par mujhe krna hai - lookup
+      // ab pta krte hai @programmingwithsatyamp channel k subscriber kitne hai?
+      // subscriber find krne ke liye lookup lagega
+    },
+    {
+      $lookup: {
+        from: "subscriptions",
+        localField: "_id",
+        foreignField: "channel",
+        as: "subscribers",
+      }, // first pipeline - 1- $lookup me sare channel find ho gye jo mere channel ko subscribe kiye hai ab next step subsciber count karte hai
+      // first pipeline -is pipeline ke under sare document store kr liya hai
+    },
+
+    // second pipeline -2- ab maine kitne channel subscribe kiye ye pya krte hai
+
+    {
+      $lookup: {
+        from: "subscriptions",
+        localField: "_id",
+        foreignField: "subsciber",
+        as: "subscribedTo", // ye pta rha hai ki maine kitne channel subscribe kiye hai
+      },
+    },
+
+    // third pipeline - 3 -
+    // $addFields - name ka operator hota hai , ye operator jitni ye sabhi value
+    // (like watchHistory, username,email, avatar,coverImage, password, refreshToken,createdAt, updatedAt) rakhega hi but sath hi addition field add kr dega
+    // aur yahi to hame krna hai ki ek hi object me sara data bhej de
+
+    {
+      $addFields: {
+        subscribersCount: {
+          $size: "$subscriber", // $size operator se sare subsciber count ho jayege
+        },
+        channelsSubscribedToCount: {
+          $size: "$subscribedTo",
+        },
+
+        isSubscribed: {
+          $cond: {
+            if: {$in: [req.user?._id, "$subscribers.subscriber"]},
+            then: true,
+            else: false
+          }
+        }
+      },
+    },
+
+    // fourth pipeline - is pipeline k through project use krna hai 
+    // project q use krna hai? - project projection deta hai ki mai sari value ko eakdam waha par project nahi karunga jobhi vo demand kr rha hai 
+    //  mai use selected value dunga 
+    // selected value jaise -  fullName, mere hane ka matlab hai jis jis value ko pass krna hai
+    // but sari value na dijiye kuki network traffic badega aur data ka size badega 
+
+    {
+      $project: {
+        fullName: 1,
+        username: 1,
+        subscribersCount:1,
+        channelsSubscribedToCount:1,
+        isSubscribed:1,
+        avatar:1,
+        coverImage:1,
+        email:1,
+        // createdAt:1  // ye batega ki aaplka channel kab create hua hai
+
+      }
+    }
+
+  ]); // aggregate ek mathod hai jo array leta hai aur array ke pipeline {} likhi jati hai
+
+  if (!channel?.length) {
+    throw new ApiError(400, "channel does not exists")
+  }
+  
+  // return response in Array form 
+  return res.status(200).json(new ApiResponse(200, channel[0], "User channel fetched successfully"))
+
+});
+
 export {
   registerUser,
   loginUser,
@@ -541,5 +662,5 @@ export {
   getCurrentUser,
   updateAccountDetails,
   updateUserAvatar,
-  updateUserCoverImage
+  updateUserCoverImage,
 };
